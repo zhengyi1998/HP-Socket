@@ -1,7 +1,7 @@
 /*
  * Copyright: JessMA Open Source (ldcsaa@gmail.com)
  *
- * Version	: 3.2.3
+ * Version	: 3.3.1
  * Author	: Bruce Liang
  * Website	: http://www.jessma.org
  * Project	: https://github.com/ldcsaa
@@ -36,7 +36,7 @@ EnHandleResult CTcpAgent::FireReceive(TSocketObj* pSocketObj, const BYTE* pData,
 	{
 		if(TSocketObj::IsValid(pSocketObj))
 		{
-			CCriSecLock locallock(pSocketObj->csRecv);
+			CReentrantSpinLock locallock(pSocketObj->csRecv);
 
 			if(TSocketObj::IsValid(pSocketObj))
 			{
@@ -56,7 +56,7 @@ EnHandleResult CTcpAgent::FireReceive(TSocketObj* pSocketObj, int iLength)
 	{
 		if(TSocketObj::IsValid(pSocketObj))
 		{
-			CCriSecLock locallock(pSocketObj->csRecv);
+			CReentrantSpinLock locallock(pSocketObj->csRecv);
 
 			if(TSocketObj::IsValid(pSocketObj))
 			{
@@ -74,7 +74,7 @@ EnHandleResult CTcpAgent::FireClose(TSocketObj* pSocketObj)
 {
 	if(m_enRecvPolicy == RP_SERIAL)
 	{
-		CCriSecLock locallock(pSocketObj->csRecv);
+		CReentrantSpinLock locallock(pSocketObj->csRecv);
 		return m_psoListener->OnClose(pSocketObj->connID);
 	}
 
@@ -85,7 +85,7 @@ EnHandleResult CTcpAgent::FireError(TSocketObj* pSocketObj, EnSocketOperation en
 {
 	if(m_enRecvPolicy == RP_SERIAL)
 	{
-		CCriSecLock locallock(pSocketObj->csRecv);
+		CReentrantSpinLock locallock(pSocketObj->csRecv);
 		return m_psoListener->OnError(pSocketObj->connID, enOperation, iErrorCode);
 	}
 
@@ -145,11 +145,10 @@ BOOL CTcpAgent::CheckParams()
 
 BOOL CTcpAgent::CheckStarting()
 {
-	if(m_enState == SS_STOPED)
-	{
+	CSpinLock locallock(m_csState);
+
+	if(m_enState == SS_STOPPED)
 		m_enState = SS_STARTING;
-		::_ReadWriteBarrier();
-	}
 	else
 	{
 		SetLastError(SE_ILLEGAL_STATE, __FUNCTION__, ERROR_INVALID_OPERATION);
@@ -161,11 +160,10 @@ BOOL CTcpAgent::CheckStarting()
 
 BOOL CTcpAgent::CheckStoping()
 {
+	CSpinLock locallock(m_csState);
+
 	if(m_enState == SS_STARTED || m_enState == SS_STARTING)
-	{
-		m_enState = SS_STOPING;
-		::_ReadWriteBarrier();
-	}
+		m_enState = SS_STOPPING;
 	else
 	{
 		SetLastError(SE_ILLEGAL_STATE, __FUNCTION__, ERROR_INVALID_OPERATION);
@@ -183,7 +181,7 @@ BOOL CTcpAgent::ParseBindAddress(LPCTSTR pszBindAddress, BOOL bAsyncConnect)
 	if(sock != INVALID_SOCKET)
 	{
 		if(!pszBindAddress)
-			pszBindAddress = DEFAULT_AGENT_BIND_ADDRESS;
+			pszBindAddress = DEFAULT_BIND_ADDRESS;
 
 		::sockaddr_A_2_IN(AF_INET, pszBindAddress, 0, m_soAddrIN);
 
@@ -250,7 +248,7 @@ BOOL CTcpAgent::Stop()
 	
 	ReleaseClientSocket();
 
-	FireAgentShutdown();
+	FireShutdown();
 
 	ReleaseFreeSocket();
 	ReleaseFreeBuffer();
@@ -262,17 +260,20 @@ BOOL CTcpAgent::Stop()
 	return TRUE;
 }
 
-void CTcpAgent::Reset()
+void CTcpAgent::Reset(BOOL bAll)
 {
-	m_phSocket.Reset();
-	m_phBuffer.Reset();
-	m_itPool.Clear();
+	if(bAll)
+	{
+		m_phSocket.Reset();
+		m_phBuffer.Reset();
+		m_itPool.Clear();
+	}
 
 	::ZeroMemory((void*)&m_soAddrIN, sizeof(SOCKADDR_IN));
 
 	m_pfnConnectEx				= nullptr;
 	m_pfnDisconnectEx			= nullptr;
-	m_enState					= SS_STOPED;
+	m_enState					= SS_STOPPED;
 }
 
 void CTcpAgent::DisconnectClientSocket()
@@ -353,8 +354,8 @@ BOOL CTcpAgent::InvalidSocketObj(TSocketObj* pSocketObj)
 	{
 		if(TSocketObj::IsValid(pSocketObj))
 		{
-			CCriSecLock locallock(pSocketObj->csRecv);
-			CCriSecLock locallock2(pSocketObj->csSend);
+			CReentrantSpinLock	locallock(pSocketObj->csRecv);
+			CCriSecLock			locallock2(pSocketObj->csSend);
 
 			if(TSocketObj::IsValid(pSocketObj))
 			{
@@ -384,7 +385,8 @@ void CTcpAgent::AddClientSocketObj(CONNID dwConnID, TSocketObj* pSocketObj)
 {
 	ASSERT(FindSocketObj(dwConnID) == nullptr);
 
-	pSocketObj->connTime = ::TimeGetTime();
+	pSocketObj->connTime	= ::TimeGetTime();
+	pSocketObj->activeTime	= pSocketObj->connTime;
 
 	CReentrantWriteLock locallock(m_csClientSocket);
 	m_mpClientSocket[dwConnID] = pSocketObj;
@@ -636,7 +638,23 @@ BOOL CTcpAgent::GetConnectPeriod(CONNID dwConnID, DWORD& dwPeriod)
 	TSocketObj* pSocketObj	= FindSocketObj(dwConnID);
 
 	if(TSocketObj::IsValid(pSocketObj))
-		dwPeriod = GetTimeGap32(pSocketObj->connTime);
+		dwPeriod = ::GetTimeGap32(pSocketObj->connTime);
+	else
+		isOK = FALSE;
+
+	return isOK;
+}
+
+BOOL CTcpAgent::GetSilencePeriod(CONNID dwConnID, DWORD& dwPeriod)
+{
+	if(!m_bMarkSilence)
+		return FALSE;
+
+	BOOL isOK				= TRUE;
+	TSocketObj* pSocketObj	= FindSocketObj(dwConnID);
+
+	if(TSocketObj::IsValid(pSocketObj))
+		dwPeriod = ::GetTimeGap32(pSocketObj->activeTime);
 	else
 		isOK = FALSE;
 
@@ -675,6 +693,31 @@ BOOL CTcpAgent::DisconnectLongConnections(DWORD dwPeriod, BOOL bForce)
 		}
 	}
 	
+	for(ulong_ptr_deque::const_iterator it = ls.begin(); it != ls.end(); ++it)
+		Disconnect(*it, bForce);
+
+	return ls.size() > 0;
+}
+
+BOOL CTcpAgent::DisconnectSilenceConnections(DWORD dwPeriod, BOOL bForce)
+{
+	if(!m_bMarkSilence)
+		return FALSE;
+
+	ulong_ptr_deque ls;
+
+	{
+		CReentrantReadLock locallock(m_csClientSocket);
+
+		DWORD now = ::TimeGetTime();
+
+		for(TSocketObjPtrMapCI it = m_mpClientSocket.begin(); it != m_mpClientSocket.end(); ++it)
+		{
+			if(now - it->second->activeTime >= dwPeriod)
+				ls.push_back(it->first);
+		}
+	}
+
 	for(ulong_ptr_deque::const_iterator it = ls.begin(); it != ls.end(); ++it)
 		Disconnect(*it, bForce);
 
@@ -931,6 +974,7 @@ void CTcpAgent::TriggerFireSend(CONNID dwConnID, TBufferObj* pBufferObj)
 
 void CTcpAgent::HandleReceive(CONNID dwConnID, TSocketObj* pSocketObj, TBufferObj* pBufferObj)
 {
+	if(m_bMarkSilence) pSocketObj->activeTime = ::TimeGetTime();
 	EnHandleResult hr = FireReceive(pSocketObj, (BYTE*)pBufferObj->buff.buf, pBufferObj->buff.len);
 
 	if(hr == HR_OK || hr == HR_IGNORE)
@@ -1007,7 +1051,7 @@ DWORD CTcpAgent::CreateClientSocket(SOCKET& soClient)
 
 	if(soClient != INVALID_SOCKET)
 	{
-		::SSO_ReuseAddress(soClient, m_bReuseAddress);
+		VERIFY(::SSO_ReuseAddress(soClient, m_bReuseAddress) != SOCKET_ERROR);
 		if(m_bAsyncConnect && ::bind(soClient, (SOCKADDR*)&m_soAddrIN, sizeof(SOCKADDR_IN)) == SOCKET_ERROR)
 			result = ::WSAGetLastError();
 	}
@@ -1023,11 +1067,11 @@ DWORD CTcpAgent::ConnectToServer(CONNID dwConnID, SOCKET& soClient, LPCTSTR pszR
 	int iAddressLen = sizeof(szAddress) / sizeof(TCHAR);
 
 	if(!::GetIPAddress(pszRemoteAddress, szAddress, iAddressLen))
-		return DNS_ERROR_INVALID_IP_ADDRESS;
+		return WSAEADDRNOTAVAIL;
 
 	SOCKADDR_IN addr;
 	if(!::sockaddr_A_2_IN(AF_INET, szAddress, usPort, addr))
-		return DNS_ERROR_INVALID_IP_ADDRESS;
+		return WSAEADDRNOTAVAIL;
 
 	TBufferObj* pBufferObj = GetFreeBufferObj();
 	TSocketObj* pSocketObj = GetFreeSocketObj(dwConnID, soClient);

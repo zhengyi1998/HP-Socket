@@ -6,9 +6,13 @@ using HPSocketCS.SDK;
 
 namespace HPSocketCS
 {
+    public class TcpPullAgentEvent
+    {
+        public delegate HandleResult OnReceiveEventHandler(IntPtr connId, int length);
+    }
     public class TcpPullAgent : TcpAgent
     {
-        protected HPSocketSdk.OnPullReceive OnPullReceiveCallback;
+        protected new TcpPullAgentEvent.OnReceiveEventHandler OnReceive;
 
         public TcpPullAgent()
         {
@@ -63,6 +67,19 @@ namespace HPSocketCS
         }
 
         /// <summary>
+        /// 抓取数据
+        /// 用户通过该方法从 Socket 组件中抓取数据
+        /// </summary>
+        /// <param name="connId"></param>
+        /// <param name="pBuffer"></param>
+        /// <param name="size"></param>
+        /// <returns></returns>
+        public FetchResult Peek(IntPtr connId, IntPtr pBuffer, int size)
+        {
+            return HPSocketSdk.HP_TcpPullAgent_Peek(pAgent, connId, pBuffer, size);
+        }
+
+        /// <summary>
         /// 设置回调函数
         /// </summary>
         /// <param name="prepareConnect"></param>
@@ -72,25 +89,20 @@ namespace HPSocketCS
         /// <param name="close"></param>
         /// <param name="error"></param>
         /// <param name="agentShutdown"></param>
-        public virtual void SetCallback(HPSocketSdk.OnPrepareConnect prepareConnect, HPSocketSdk.OnConnect connect,
-            HPSocketSdk.OnSend send, HPSocketSdk.OnPullReceive recv, HPSocketSdk.OnClose close,
-            HPSocketSdk.OnError error, HPSocketSdk.OnAgentShutdown agentShutdown)
+        protected override void SetCallback()
         {
-
             // 设置 Socket 监听器回调函数
-            OnPullReceiveCallback = new HPSocketSdk.OnPullReceive(recv);
-
-            // 设置 Socket 监听器回调函数
-            HPSocketSdk.HP_Set_FN_Server_OnPullReceive(pListener, OnPullReceiveCallback);
-
-            base.SetCallback(OnPrepareConnect, OnConnect, OnSend, OnReceive, OnClose, OnError, OnAgentShutdown); ;
+            HPSocketSdk.HP_Set_FN_Agent_OnPullReceive(pListener, SDK_OnReceive);
+            base.SetCallback();
         }
 
-
-        public virtual void SetOnPullReceiveCallback(HPSocketSdk.OnPullReceive recv)
+        protected virtual HandleResult SDK_OnReceive(IntPtr connId, int length)
         {
-            OnPullReceiveCallback = new HPSocketSdk.OnPullReceive(recv);
-            HPSocketSdk.HP_Set_FN_Server_OnPullReceive(pListener, OnPullReceiveCallback);
+            if (OnReceive != null)
+            {
+                OnReceive(connId, length);
+            }
+            return HandleResult.Ignore;
         }
 
         /// <summary>
@@ -112,17 +124,6 @@ namespace HPSocketCS
             }
 
             IsCreate = false;
-        }
-
-        /// <summary>
-        /// 数据到达
-        /// </summary>
-        /// <param name="dwConnId"></param>
-        /// <param name="iLength"></param>
-        /// <returns></returns>
-        protected virtual HandleResult OnPullReceive(uint dwConnId, int iLength)
-        {
-            return HandleResult.Ok;
         }
     }
 }

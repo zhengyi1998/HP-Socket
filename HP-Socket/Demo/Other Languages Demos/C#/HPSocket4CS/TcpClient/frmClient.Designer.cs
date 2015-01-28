@@ -1,4 +1,4 @@
-﻿namespace TcpClient
+﻿namespace TcpClientNS
 {
     partial class frmClient
     {

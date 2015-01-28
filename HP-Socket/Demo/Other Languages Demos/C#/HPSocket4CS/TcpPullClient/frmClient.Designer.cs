@@ -1,4 +1,4 @@
-﻿namespace TcpPullClient
+﻿namespace TcpPullClientNS
 {
     partial class frmClient
     {

@@ -8,7 +8,7 @@
     <ProjectGuid>{B6E43918-236A-4EA7-84C8-ED4A98049907}</ProjectGuid>
     <OutputType>WinExe</OutputType>
     <AppDesignerFolder>Properties</AppDesignerFolder>
-    <RootNamespace>TcpClient</RootNamespace>
+    <RootNamespace>TcpClientNS</RootNamespace>
     <AssemblyName>TcpClient</AssemblyName>
     <TargetFrameworkVersion>v4.0</TargetFrameworkVersion>
     <TargetFrameworkProfile>Client</TargetFrameworkProfile>

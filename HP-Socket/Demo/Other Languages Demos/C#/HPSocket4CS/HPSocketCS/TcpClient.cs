@@ -10,19 +10,23 @@ using System.Runtime.Serialization.Formatters.Binary;
 
 namespace HPSocketCS
 {
+    public class TcpClientEvent
+    {
+        public delegate HandleResult OnPrepareConnectEventHandler(TcpClient sender, uint socket);
+        public delegate HandleResult OnConnectEventHandler(TcpClient sender);
+        public delegate HandleResult OnSendEventHandler(TcpClient sender, IntPtr pData, int length);
+        public delegate HandleResult OnReceiveEventHandler(TcpClient sender, IntPtr pData, int length);
+        public delegate HandleResult OnCloseEventHandler(TcpClient sender);
+        public delegate HandleResult OnErrorEventHandler(TcpClient sender, SocketOperation enOperation, int errorCode);
+    }
+
     public class TcpClient
     {
         protected IntPtr _pClient = IntPtr.Zero;
-
         protected IntPtr pClient
         {
             get
             {
-                //if (_pClient == IntPtr.Zero)
-                //{
-                //    throw new Exception("pClient == 0");
-                //}
-
                 return _pClient;
             }
 
@@ -32,18 +36,35 @@ namespace HPSocketCS
             }
         }
 
-
         protected IntPtr pListener = IntPtr.Zero;
 
-        protected HPSocketSdk.OnConnect OnConnectCallback;
-        protected HPSocketSdk.OnSend OnSendCallback;
-        protected HPSocketSdk.OnPrepareConnect OnPrepareConnectCallback;
-        protected HPSocketSdk.OnReceive OnReceiveCallback;
-        protected HPSocketSdk.OnClose OnCloseCallback;
-        protected HPSocketSdk.OnError OnErrorCallback;
-
-        protected bool IsSetCallback = false;
         protected bool IsCreate = false;
+
+        /****************************************************/
+        /// <summary>
+        /// 准备连接了事件
+        /// </summary>
+        public event TcpClientEvent.OnPrepareConnectEventHandler OnPrepareConnect;
+        /// <summary>
+        /// 连接事件
+        /// </summary>
+        public event TcpClientEvent.OnConnectEventHandler OnConnect;
+        /// <summary>
+        /// 数据发送事件
+        /// </summary>
+        public event TcpClientEvent.OnSendEventHandler OnSend;
+        /// <summary>
+        /// 数据到达事件
+        /// </summary>
+        public event TcpClientEvent.OnReceiveEventHandler OnReceive;
+        /// <summary>
+        /// 连接关闭事件
+        /// </summary>
+        public event TcpClientEvent.OnCloseEventHandler OnClose;
+        /// <summary>
+        /// 连接发生错误事件
+        /// </summary>
+        public event TcpClientEvent.OnErrorEventHandler OnError;
 
         public TcpClient()
         {
@@ -52,11 +73,6 @@ namespace HPSocketCS
 
         ~TcpClient()
         {
-            //if (HasStarted() == true)
-            //{
-            //    Stop();
-            //}
-
             Destroy();
         }
 
@@ -71,6 +87,7 @@ namespace HPSocketCS
             {
                 return false;
             }
+
 
             pListener = HPSocketSdk.Create_HP_TcpClientListener();
             if (pListener == IntPtr.Zero)
@@ -117,7 +134,7 @@ namespace HPSocketCS
         /// <param name="port"></param>
         /// <param name="async">是否异步</param>
         /// <returns></returns>
-        public bool Start(string address, ushort port, bool async = false)
+        public bool Connetion(string address, ushort port, bool async = false)
         {
             if (string.IsNullOrEmpty(address) == true)
             {
@@ -128,15 +145,12 @@ namespace HPSocketCS
                 throw new Exception("port is zero");
             }
 
-            if (IsSetCallback == false)
-            {
-                // throw new Exception("请在调用Start方法前先调用SetCallback()方法");
-            }
-
-            if (HasStarted() == true)
+            if (IsStarted == true)
             {
                 return false;
             }
+
+            this.SetCallback();
 
             return HPSocketSdk.HP_Client_Start(pClient, address, port, async);
         }
@@ -147,7 +161,7 @@ namespace HPSocketCS
         /// <returns></returns>
         public bool Stop()
         {
-            if (HasStarted() == false)
+            if (IsStarted == false)
             {
                 return false;
             }
@@ -236,7 +250,7 @@ namespace HPSocketCS
         /// 向指定连接发送多组数据
         /// TCP - 顺序发送所有数据包
         /// </summary>
-        /// <param name="dwConnID">连接 ID</param>
+        /// <param name="connId">连接 ID</param>
         /// <param name="pBuffers">发送缓冲区数组</param>
         /// <param name="iCount">发送缓冲区数目</param>
         /// <returns>TRUE.成功,FALSE.失败，可通过 SYSGetLastError() 获取 Windows 错误代码</returns>
@@ -251,7 +265,7 @@ namespace HPSocketCS
         /// 向指定连接发送多组数据
         /// TCP - 顺序发送所有数据包
         /// </summary>
-        /// <param name="dwConnID">连接 ID</param>
+        /// <param name="connId">连接 ID</param>
         /// <param name="pBuffers">发送缓冲区数组</param>
         /// <param name="iCount">发送缓冲区数目</param>
         /// <returns>TRUE.成功,FALSE.失败，可通过 SYSGetLastError() 获取 Windows 错误代码</returns>
@@ -363,25 +377,28 @@ namespace HPSocketCS
         /// <summary>
         /// 获取错误码
         /// </summary>
-        /// <returns></returns>
-        public SocketError GetlastError()
+        public SocketError ErrorCode
         {
-            return HPSocketSdk.HP_Client_GetLastError(pClient);
+            get
+            {
+                return HPSocketSdk.HP_Client_GetLastError(pClient);
+            }
         }
 
         /// <summary>
         /// 获取错误信息
         /// </summary>
-        /// <returns></returns>
-        public string GetLastErrorDesc()
+        public string ErrorMessage
         {
-            IntPtr ptr = HPSocketSdk.HP_Client_GetLastErrorDesc(pClient);
-            string desc = Marshal.PtrToStringUni(ptr);
-            return desc;
+            get
+            {
+                IntPtr ptr = HPSocketSdk.HP_Client_GetLastErrorDesc(pClient);
+                string desc = Marshal.PtrToStringUni(ptr);
+                return desc;
+            }
         }
 
         /// <summary>
-        /// 获取连接中未发出数据的长度
         /// </summary>
         /// <param name="connId"></param>
         /// <param name="length"></param>
@@ -391,23 +408,42 @@ namespace HPSocketCS
             return HPSocketSdk.HP_Client_GetPendingDataLength(pClient, ref length);
         }
 
-        // 是否启动
-        public bool HasStarted()
+        /// <summary>
+        /// 设置连接的附加数据
+        /// </summary>
+        /// <param name="connId"></param>
+        /// <param name="obj">如果为null,则为释放设置的数据</param>
+        /// <returns></returns>
+        public void SetExtra(IntPtr client, object obj)
         {
-            if (pClient == IntPtr.Zero)
+            // 释放附加数据
+            IntPtr ptr = HPSocketSdk.HP_Client_GetExtra(client);
+            if (ptr != IntPtr.Zero)
             {
-                return false;
+                Marshal.FreeHGlobal(ptr);
+                ptr = IntPtr.Zero;
             }
-            return HPSocketSdk.HP_Client_HasStarted(pClient);
+
+            if (obj != null)
+            {
+                // 设置附加数据
+                ptr = Marshal.AllocHGlobal(Marshal.SizeOf(obj));
+                Marshal.StructureToPtr(obj, ptr, false);
+            }
+            HPSocketSdk.HP_Client_SetExtra(pClient, ptr);
         }
 
         /// <summary>
-        /// 获取状态
+        /// 获取附加数据
+        /// 如设置的是个结构体/类对象,可以用 Type objA = (Type)Marshal.PtrToStructure(ptr, typeof(Type)) 获取
+        /// 其中Type是结构体/类名,ptr是该方法的传出值,在该方法返回为true的时候可用
         /// </summary>
+        /// <param name="connId"></param>
+        /// <param name="ptr"></param>
         /// <returns></returns>
-        public ServiceState GetState()
+        public IntPtr GetExtra(IntPtr client)
         {
-            return HPSocketSdk.HP_Client_GetState(pClient);
+            return HPSocketSdk.HP_Client_GetExtra(client);
         }
 
         /// <summary>
@@ -432,106 +468,119 @@ namespace HPSocketCS
         }
 
         /// <summary>
+        /// 是否启动
+        /// </summary>
+        public bool IsStarted
+        {
+            get
+            {
+                if (pClient == IntPtr.Zero)
+                {
+                    return false;
+                }
+                return HPSocketSdk.HP_Client_HasStarted(pClient);
+            }
+        }
+
+        /// <summary>
+        /// 状态
+        /// </summary>
+        public ServiceState State
+        {
+            get
+            {
+                return HPSocketSdk.HP_Client_GetState(pClient);
+            }
+
+        }
+
+        /// <summary>
         /// 获取该组件对象的连接Id
         /// </summary>
-        /// <returns></returns>
-        public IntPtr GetConnectionId()
+        public IntPtr ConnectionId
         {
-            return HPSocketSdk.HP_Client_GetConnectionID(pClient);
-        }
+            get
+            {
+                return HPSocketSdk.HP_Client_GetConnectionID(pClient);
+            }
 
+        }
         ///////////////////////////////////////////////////////////////////////////////////////
 
         /// <summary>
-        /// 设置内存块缓存池大小（通常设置为 -> PUSH 模型：5 - 10；PULL 模型：10 - 20 ）
+        /// 读取或设置内存块缓存池大小（通常设置为 -> PUSH 模型：5 - 10；PULL 模型：10 - 20 ）
         /// </summary>
-        /// <param name="val"></param>
-        public void SetFreeBufferPoolSize(uint val)
+        public uint FreeBufferPoolSize
         {
-            HPSocketSdk.HP_Client_SetFreeBufferPoolSize(pClient, val);
+            get
+            {
+                return HPSocketSdk.HP_Client_GetFreeBufferPoolSize(pClient);
+            }
+            set
+            {
+                HPSocketSdk.HP_Client_SetFreeBufferPoolSize(pClient, value);
+            }
         }
 
         /// <summary>
-        ///  设置内存块缓存池回收阀值（通常设置为内存块缓存池大小的 3 倍）
+        ///  读取或设置内存块缓存池回收阀值（通常设置为内存块缓存池大小的 3 倍）
         /// </summary>
-        /// <param name="val"></param>
-        public void SetFreeBufferPoolHold(uint val)
+        public uint FreeBufferPoolHold
         {
-            HPSocketSdk.HP_Client_SetFreeBufferPoolHold(pClient, val);
-        }
-
-        /// <summary>
-        /// 获取内存块缓存池大小
-        /// </summary>
-        /// <returns></returns>
-        public uint GetFreeBufferPoolSize()
-        {
-            return HPSocketSdk.HP_Client_GetFreeBufferPoolSize(pClient);
-        }
-
-        /// <summary>
-        /// 获取内存块缓存池回收阀值
-        /// </summary>
-        /// <returns></returns>
-        public uint GetFreeBufferPoolHold()
-        {
-            return HPSocketSdk.HP_Client_GetFreeBufferPoolHold(pClient);
+            get
+            {
+                return HPSocketSdk.HP_Client_GetFreeBufferPoolHold(pClient);
+            }
+            set
+            {
+                HPSocketSdk.HP_Client_SetFreeBufferPoolHold(pClient, value);
+            }
         }
 
         ///////////////////////////////////////////////////////////////////////////////////////
-
         /// <summary>
-        /// 设置通信数据缓冲区大小（根据平均通信数据包大小调整设置，通常设置为：(N * 1024) - sizeof(TBufferObj)）
+        ///  读取或设置通信数据缓冲区大小（根据平均通信数据包大小调整设置，通常设置为：(N * 1024) - sizeof(TBufferObj)）
         /// </summary>
-        /// <param name="val"></param>
-        public void SetSocketBufferSize(uint val)
+        public uint SocketBufferSize
         {
-            HPSocketSdk.HP_TcpClient_SetSocketBufferSize(pClient, val);
+            get
+            {
+                return HPSocketSdk.HP_TcpClient_GetSocketBufferSize(pClient);
+            }
+            set
+            {
+                HPSocketSdk.HP_TcpClient_SetSocketBufferSize(pClient, value);
+            }
         }
 
         /// <summary>
-        /// 设置心跳包间隔（毫秒，0 则不发送心跳包）
+        ///  读取或设置心跳包间隔（毫秒，0 则不发送心跳包）
         /// </summary>
-        /// <param name="val"></param>
-        public void SetKeepAliveTime(uint val)
+        public uint KeepAliveTime
         {
-            HPSocketSdk.HP_TcpClient_SetKeepAliveTime(pClient, val);
+            get
+            {
+                return HPSocketSdk.HP_TcpClient_GetKeepAliveTime(pClient);
+            }
+            set
+            {
+                HPSocketSdk.HP_TcpClient_SetKeepAliveTime(pClient, value);
+            }
         }
 
         /// <summary>
-        /// 设置心跳确认包检测间隔（毫秒，0 不发送心跳包，如果超过若干次 [默认：WinXP 5 次, Win7 10 次] 检测不到心跳确认包则认为已断线）
+        ///  读取或设置心跳确认包检测间隔（毫秒，0 不发送心跳包，如果超过若干次 [默认：WinXP 5 次, Win7 10 次] 检测不到心跳确认包则认为已断线）
         /// </summary>
-        /// <returns></returns>
-        public void SetKeepAliveInterval(uint val)
+        public uint KeepAliveInterval
         {
-            HPSocketSdk.HP_TcpClient_SetKeepAliveInterval(pClient, val);
-        }
-
-        /// <summary>
-        /// 获取通信数据缓冲区大小
-        /// </summary>
-        /// <returns></returns>
-        public uint GetSocketBufferSize()
-        {
-            return HPSocketSdk.HP_TcpClient_GetSocketBufferSize(pClient);
-        }
-
-        /// <summary>
-        /// 获取心跳检查次数
-        /// </summary>
-        /// <returns></returns>
-        public uint GetKeepAliveTime()
-        {
-            return HPSocketSdk.HP_TcpClient_GetKeepAliveTime(pClient);
-        }
-
-        /// <summary>
-        /// 获取心跳检查间隔
-        /// </summary>
-        /// <returns></returns>
-        public uint GetKeepAliveInterval()
-        {
-            return HPSocketSdk.HP_TcpClient_GetKeepAliveInterval(pClient);
+            get
+            {
+                return HPSocketSdk.HP_TcpClient_GetKeepAliveInterval(pClient);
+            }
+            set
+            {
+                HPSocketSdk.HP_TcpClient_SetKeepAliveInterval(pClient, value);
+            }
         }
 
 
@@ -552,143 +601,70 @@ namespace HPSocketCS
         /// <summary>
         /// 设置回调函数
         /// </summary>
-        /// <param name="prepareConnect"></param>
-        /// <param name="connect"></param>
-        /// <param name="send"></param>
-        /// <param name="recv"></param>
-        /// <param name="close"></param>
-        /// <param name="error"></param>
-        public void SetCallback(HPSocketSdk.OnPrepareConnect prepareConnect, HPSocketSdk.OnConnect connect,
-            HPSocketSdk.OnSend send, HPSocketSdk.OnReceive recv, HPSocketSdk.OnClose close,
-            HPSocketSdk.OnError error)
+        protected virtual void SetCallback()
         {
-            if (IsSetCallback == true)
+            // 设置 Socket 监听器回调函数
+            HPSocketSdk.HP_Set_FN_Client_OnPrepareConnect(pListener, SDK_OnPrepareConnect);
+            HPSocketSdk.HP_Set_FN_Client_OnConnect(pListener, SDK_OnConnect);
+            HPSocketSdk.HP_Set_FN_Client_OnSend(pListener, SDK_OnSend);
+            HPSocketSdk.HP_Set_FN_Client_OnReceive(pListener, SDK_OnReceive);
+            HPSocketSdk.HP_Set_FN_Client_OnClose(pListener, SDK_OnClose);
+            HPSocketSdk.HP_Set_FN_Client_OnError(pListener, SDK_OnError);
+        }
+
+
+        protected HandleResult SDK_OnPrepareConnect(IntPtr pClient, uint socket)
+        {
+            if (OnPrepareConnect != null)
             {
-                throw new Exception("已经调用过SetCallback()方法,如果您确定没手动调用过该方法,并想要手动设置各回调函数,请在构造该类构造函数中传false值,并再次调用该方法。");
+                return OnPrepareConnect(this, socket);
             }
-
-
-            // 设置 Socket 监听器回调函数
-            OnConnectCallback = new HPSocketSdk.OnConnect(connect);
-            OnSendCallback = new HPSocketSdk.OnSend(send);
-            OnPrepareConnectCallback = new HPSocketSdk.OnPrepareConnect(prepareConnect);
-            OnReceiveCallback = new HPSocketSdk.OnReceive(recv);
-            OnCloseCallback = new HPSocketSdk.OnClose(close);
-            OnErrorCallback = new HPSocketSdk.OnError(error);
-
-            // 设置 Socket 监听器回调函数
-            HPSocketSdk.HP_Set_FN_Client_OnPrepareConnect(pListener, OnPrepareConnectCallback);
-            HPSocketSdk.HP_Set_FN_Client_OnConnect(pListener, OnConnectCallback);
-            HPSocketSdk.HP_Set_FN_Client_OnSend(pListener, OnSendCallback);
-            HPSocketSdk.HP_Set_FN_Client_OnReceive(pListener, OnReceiveCallback);
-            HPSocketSdk.HP_Set_FN_Client_OnClose(pListener, OnCloseCallback);
-            HPSocketSdk.HP_Set_FN_Client_OnError(pListener, OnErrorCallback);
-
-            IsSetCallback = true;
+            return HandleResult.Ignore;
         }
 
-        public virtual void SetOnErrorCallback(HPSocketSdk.OnError error)
+        protected HandleResult SDK_OnConnect(IntPtr pClient)
         {
-            OnErrorCallback = new HPSocketSdk.OnError(error);
-            HPSocketSdk.HP_Set_FN_Server_OnError(pListener, OnErrorCallback);
+            if (OnConnect != null)
+            {
+                return OnConnect(this);
+            }
+            return HandleResult.Ignore;
         }
 
-        public virtual void SetOnCloseCallback(HPSocketSdk.OnClose close)
+        protected HandleResult SDK_OnSend(IntPtr pClient, IntPtr pData, int length)
         {
-            OnCloseCallback = new HPSocketSdk.OnClose(close);
-            HPSocketSdk.HP_Set_FN_Server_OnClose(pListener, OnCloseCallback);
+            if (OnSend != null)
+            {
+                return OnSend(this, pData, length);
+            }
+            return HandleResult.Ignore;
         }
 
-        public virtual void SetOnReceiveCallback(HPSocketSdk.OnReceive recv)
+        protected HandleResult SDK_OnReceive(IntPtr pClient, IntPtr pData, int length)
         {
-            OnReceiveCallback = new HPSocketSdk.OnReceive(recv);
-            HPSocketSdk.HP_Set_FN_Server_OnReceive(pListener, OnReceiveCallback);
+            if (OnReceive != null)
+            {
+                return OnReceive(this, pData, length);
+            }
+            return HandleResult.Ignore;
         }
 
-        public virtual void SetOnPrepareConnectCallback(HPSocketSdk.OnPrepareConnect prepareConnect)
+        protected HandleResult SDK_OnClose(IntPtr pClient)
         {
-            OnPrepareConnectCallback = new HPSocketSdk.OnPrepareConnect(prepareConnect);
-            HPSocketSdk.HP_Set_FN_Agent_OnPrepareConnect(pListener, OnPrepareConnectCallback);
+            if (OnClose != null)
+            {
+                return OnClose(this);
+            }
+            return HandleResult.Ignore;
         }
 
-        public virtual void SetOnConnectCallback(HPSocketSdk.OnConnect connect)
+        protected HandleResult SDK_OnError(IntPtr pClient, SocketOperation enOperation, int errorCode)
         {
-            OnConnectCallback = new HPSocketSdk.OnConnect(connect);
-            HPSocketSdk.HP_Set_FN_Agent_OnConnect(pListener, OnConnectCallback);
-        }
-
-        public virtual void SetOnSendCallback(HPSocketSdk.OnSend send)
-        {
-            OnSendCallback = new HPSocketSdk.OnSend(send);
-            HPSocketSdk.HP_Set_FN_Server_OnSend(pListener, OnSendCallback);
-        }
-        //////////////////////////////////////////////////////////////////////////////////////
-
-        /// <summary>
-        /// 准备连接了 到达一次
-        /// </summary>
-        /// <param name="dwConnId"></param>
-        /// <param name="socket"></param>
-        /// <returns></returns>
-        protected virtual HandleResult OnPrepareConnect(IntPtr dwConnId, uint socket)
-        {
-            return HandleResult.Ok;
-        }
-
-        /// <summary>
-        /// 已连接 到达一次
-        /// </summary>
-        /// <param name="dwConnId"></param>
-        /// <returns></returns>
-        protected virtual HandleResult OnConnect(IntPtr dwConnId)
-        {
-            return HandleResult.Ok;
-        }
-
-        /// <summary>
-        /// 客户端发数据了
-        /// </summary>
-        /// <param name="dwConnId"></param>
-        /// <param name="pData"></param>
-        /// <param name="iLength"></param>
-        /// <returns></returns>
-        protected virtual HandleResult OnSend(IntPtr dwConnId, IntPtr pData, int iLength)
-        {
-            return HandleResult.Ok;
-        }
-
-        /// <summary>
-        /// 数据到达了
-        /// </summary>
-        /// <param name="dwConnId"></param>
-        /// <param name="pData"></param>
-        /// <param name="iLength"></param>
-        /// <returns></returns>
-        protected virtual HandleResult OnReceive(IntPtr dwConnId, IntPtr pData, int iLength)
-        {
-            return HandleResult.Ok;
-        }
-
-        /// <summary>
-        /// 连接关闭了
-        /// </summary>
-        /// <param name="dwConnId"></param>
-        /// <returns></returns>
-        protected virtual HandleResult OnClose(IntPtr dwConnId)
-        {
-            return HandleResult.Ok;
-        }
-
-        /// <summary>
-        /// 出错了
-        /// </summary>
-        /// <param name="dwConnId"></param>
-        /// <param name="enOperation"></param>
-        /// <param name="iErrorCode"></param>
-        /// <returns></returns>
-        protected virtual HandleResult OnError(IntPtr dwConnId, SocketOperation enOperation, int iErrorCode)
-        {
-            return HandleResult.Ok;
+            if (OnError != null)
+            {
+                return OnError(this, enOperation, errorCode);
+            }
+            return HandleResult.Ignore;
         }
 
         ///////////////////////////////////////////////////////////////////////////
@@ -696,7 +672,6 @@ namespace HPSocketCS
         /// <summary>
         /// 获取系统返回的错误码
         /// </summary>
-        /// <returns></returns>
         public int SYSGetLastError()
         {
             return HPSocketSdk.SYS_GetLastError();
@@ -705,7 +680,6 @@ namespace HPSocketCS
         /// <summary>
         /// 调用系统的 ::WSAGetLastError() 方法获取通信错误代码
         /// </summary>
-        /// <returns></returns>
         public int SYSWSAGetLastError()
         {
             return HPSocketSdk.SYS_WSAGetLastError();

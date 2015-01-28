@@ -1,7 +1,7 @@
 /*
  * Copyright: JessMA Open Source (ldcsaa@gmail.com)
  *
- * Version	: 2.3.7
+ * Version	: 2.3.8
  * Author	: Bruce Liang
  * Website	: http://www.jessma.org
  * Project	: https://github.com/ldcsaa
@@ -49,6 +49,7 @@ public:
 	inline int Cat		(const BYTE* pData, int length);
 	inline int Cat		(const TItem& other);
 	inline int Fetch	(BYTE* pData, int length);
+	inline int Peek		(BYTE* pData, int length);
 	inline int Reduce	(int length);
 	inline void	Reset	(int first = 0, int last = 0);
 
@@ -197,7 +198,7 @@ public:
 
 	TSimpleList<T>& Shift(TSimpleList<T>& other)
 	{
-		if(other.size > 0)
+		if(&other != this && other.size > 0)
 		{
 			if(size > 0)
 			{
@@ -228,9 +229,9 @@ public:
 		}
 	}
 
-	T*		Front	()	const	{return pFront;}
-	T*		Back	()	const	{return pBack;}
-	int		Size	()	const	{return size;}
+	T*	Front	()	const	{return pFront;}
+	T*	Back		()	const	{return pBack;}
+	int	Size		()	const	{return size;}
 	bool	IsEmpty	()	const	{return size == 0;}
 
 public:
@@ -260,6 +261,7 @@ public:
 	int Cat		(const TItem* pItem);
 	int Cat		(const TItemList& other);
 	int Fetch	(BYTE* pData, int length);
+	int Peek	(BYTE* pData, int length);
 	int Reduce	(int length);
 	void Release();
 
@@ -309,9 +311,13 @@ public:
 
 	TItemListEx& Shift(TItemListEx& other)
 	{
-		length += other.length;
-		__super::Shift(other);
-		other.length = 0;
+		if(&other != this && other.length > 0)
+		{
+			length += other.length;
+			other.length = 0;
+
+			__super::Shift(other);
+		}
 
 		return *this;
 	}
@@ -355,7 +361,7 @@ public:
 
 	int Fetch(BYTE* pData, int length)
 	{
-		int fetch	= __super::Fetch(pData, length);
+		int fetch	  = __super::Fetch(pData, length);
 		this->length -= fetch;
 
 		return fetch;
@@ -363,7 +369,7 @@ public:
 
 	int Reduce(int length)
 	{
-		int reduce	= __super::Reduce(length);
+		int reduce	  = __super::Reduce(length);
 		this->length -= reduce;
 
 		return reduce;
@@ -505,6 +511,7 @@ public:
 	int Cat		(const TItem* pItem);
 	int Cat		(const TItemList& other);
 	int Fetch	(BYTE* pData, int length);
+	int Peek	(BYTE* pData, int length);
 	int Reduce	(int len);
 
 public:

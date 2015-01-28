@@ -120,7 +120,7 @@ namespace TcpProxyServer
                 if (proxyServer.Start())
                 {
                     SetAppState(AppState.Started);
-                    throw new Exception(string.Format("$Server Start OK -> ({0}:{1}->{2}:{3})", 
+                    AddMsg(string.Format("$Server Start OK -> ({0}:{1}->{2}:{3})", 
                                             proxyServer.BindAddr, proxyServer.BindPort,
                                             proxyServer.TargetAddr, proxyServer.TargetPort));
                 }
@@ -139,17 +139,16 @@ namespace TcpProxyServer
         {
             try
             {
-                // 未做64位判断
-                IntPtr dwConnId = (IntPtr)Convert.ToUInt32(this.txtDisConn.Text.Trim());
+                IntPtr connId = (IntPtr)Convert.ToUInt32(this.txtDisConn.Text.Trim());
 
                 // 断开指定客户
-                if (proxyServer.Disconnect(dwConnId))
+                if (proxyServer.Disconnect(connId))
                 {
-                    AddMsg(string.Format("$({0}) Disconnect OK", dwConnId));
+                    AddMsg(string.Format("$({0}) Disconnect OK", connId));
                 }
                 else
                 {
-                    throw new Exception(string.Format("Disconnect({0}) Error", dwConnId));
+                    throw new Exception(string.Format("Disconnect({0}) Error", connId));
                 }
             }
             catch (Exception ex)

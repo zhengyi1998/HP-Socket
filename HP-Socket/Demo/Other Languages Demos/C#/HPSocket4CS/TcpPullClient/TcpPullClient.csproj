@@ -8,7 +8,7 @@
     <ProjectGuid>{B9965E66-853A-47CC-B0C9-197B5A29ABFC}</ProjectGuid>
     <OutputType>WinExe</OutputType>
     <AppDesignerFolder>Properties</AppDesignerFolder>
-    <RootNamespace>TcpPullClient</RootNamespace>
+    <RootNamespace>TcpPullClientNS</RootNamespace>
     <AssemblyName>TcpPullClient</AssemblyName>
     <TargetFrameworkVersion>v4.0</TargetFrameworkVersion>
     <TargetFrameworkProfile>Client</TargetFrameworkProfile>

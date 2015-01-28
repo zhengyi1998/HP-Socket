@@ -9,7 +9,7 @@ using System.Windows.Forms;
 using HPSocketCS;
 using System.Runtime.InteropServices;
 
-namespace TcpPullClient
+namespace TcpPullClientNS
 {
     public enum AppState
     {
@@ -46,11 +46,15 @@ namespace TcpPullClient
 
                 pkgInfo.IsHeader = true;
                 pkgInfo.Length = pkgHeaderSize;
+
+                // 设置client事件
+                client.OnPrepareConnect += new TcpClientEvent.OnPrepareConnectEventHandler(OnPrepareConnect);
+                client.OnConnect += new TcpClientEvent.OnConnectEventHandler(OnConnect);
+                client.OnSend += new TcpClientEvent.OnSendEventHandler(OnSend);
+                client.OnReceive += new TcpPullClientEvent.OnReceiveEventHandler(OnReceive);
+                client.OnClose += new TcpClientEvent.OnCloseEventHandler(OnClose);
+                client.OnError += new TcpClientEvent.OnErrorEventHandler(OnError);
                 
-                // 设置 Socket 监听器回调函数
-                client.SetCallback(OnPrepareConnect, OnConnect, OnSend, OnReceive, OnClose, OnError);
-
-
                 SetAppState(AppState.Stoped);
             }
             catch (Exception ex)
@@ -72,7 +76,7 @@ namespace TcpPullClient
 
                 AddMsg(string.Format("$Client Starting ... -> ({0}:{1})", ip, port));
 
-                if (client.Start(ip, port, this.cbxAsyncConn.Checked))
+                if (client.Connetion(ip, port, this.cbxAsyncConn.Checked))
                 {
                     if (cbxAsyncConn.Checked == false)
                     {
@@ -82,7 +86,7 @@ namespace TcpPullClient
                 else
                 {
                     SetAppState(AppState.Stoped);
-                    throw new Exception(string.Format("$Client Start Error -> {0}({1})", client.GetLastErrorDesc(), client.GetlastError()));
+                    throw new Exception(string.Format("$Client Start Error -> {0}({1})", client.ErrorMessage, client.ErrorCode));
                 }
             }
             catch (Exception ex)
@@ -102,7 +106,7 @@ namespace TcpPullClient
             }
             else
             {
-                AddMsg(string.Format("$Stop Error -> {0}({1})", client.GetLastErrorDesc(), client.GetlastError()));
+                AddMsg(string.Format("$Stop Error -> {0}({1})", client.ErrorMessage, client.ErrorCode));
             }
         }
 
@@ -131,14 +135,14 @@ namespace TcpPullClient
                 byte[] sendBytes = GetSendBuffer(headerBytes, bodyBytes);
 
                 // 发送
-                IntPtr dwConnId = client.GetConnectionId();
+                IntPtr connId = client.ConnectionId;
                 if (client.Send(sendBytes, sendBytes.Length))
                 {
-                    AddMsg(string.Format("$ ({0}) Send OK --> {1}", dwConnId, send));
+                    AddMsg(string.Format("$ ({0}) Send OK --> {1}", connId, send));
                 }
                 else
                 {
-                    AddMsg(string.Format("$ ({0}) Send Fail --> {1} ({2})", dwConnId, send, sendBytes.Length));
+                    AddMsg(string.Format("$ ({0}) Send Fail --> {1} ({2})", connId, send, sendBytes.Length));
                 }
 
             }
@@ -175,32 +179,32 @@ namespace TcpPullClient
             }
         }
 
-        HandleResult OnPrepareConnect(IntPtr dwConnId, uint socket)
+        HandleResult OnPrepareConnect(TcpClient sender, uint socket)
         {
             return HandleResult.Ok;
         }
 
-        HandleResult OnConnect(IntPtr dwConnId)
+        HandleResult OnConnect(TcpClient sender)
         {
             // 已连接 到达一次
             // 如果是异步联接,更新界面状态
 
             this.Invoke(new ConnectUpdateUiDelegate(ConnectUpdateUi));
 
-            AddMsg(string.Format(" > [{0},OnConnect]", dwConnId));
+            AddMsg(string.Format(" > [{0},OnConnect]", sender.ConnectionId));
 
             return HandleResult.Ok;
         }
 
-        HandleResult OnSend(IntPtr dwConnId, IntPtr pData, int iLength)
+        HandleResult OnSend(TcpClient sender, IntPtr pData, int length)
         {
             // 客户端发数据了
-            AddMsg(string.Format(" > [{0},OnSend] -> ({1} bytes)", dwConnId, iLength));
+            AddMsg(string.Format(" > [{0},OnSend] -> ({1} bytes)", sender.ConnectionId, length));
 
             return HandleResult.Ok;
         }
 
-        HandleResult OnReceive(IntPtr dwConnId, int iLength)
+        HandleResult OnReceive(TcpPullClient sender, int length)
         {
             // 数据到达了
 
@@ -208,7 +212,7 @@ namespace TcpPullClient
             int required = pkgInfo.Length;
 
             // 剩余大小
-            int remain = iLength;
+            int remain = length;
 
 
             while (remain >= required)
@@ -217,8 +221,8 @@ namespace TcpPullClient
                 try
                 {
                     remain -= required;
-                    bufferPtr = Marshal.AllocHGlobal(required); ;
-                    if (client.Fetch(dwConnId, bufferPtr, required) == FetchResult.Ok)
+                    bufferPtr = Marshal.AllocHGlobal(required); 
+                    if (sender.Fetch(bufferPtr, required) == FetchResult.Ok)
                     {
                         if (pkgInfo.IsHeader == true)
                         {
@@ -238,7 +242,7 @@ namespace TcpPullClient
                             required = pkgHeaderSize;
                         }
 
-                        AddMsg(string.Format(" > [{0},OnReceive] -> ({1} bytes)", dwConnId, pkgInfo.Length));
+                        AddMsg(string.Format(" > [{0},OnReceive] -> ({1} bytes)", sender.ConnectionId, pkgInfo.Length));
 
                         pkgInfo.IsHeader = !pkgInfo.IsHeader;
                         pkgInfo.Length = required;
@@ -261,22 +265,22 @@ namespace TcpPullClient
             return HandleResult.Ok;
         }
 
-        HandleResult OnClose(IntPtr dwConnId)
+        HandleResult OnClose(TcpClient sender)
         {
             // 连接关闭了
 
-            AddMsg(string.Format(" > [{0},OnClose]", dwConnId));
+            AddMsg(string.Format(" > [{0},OnClose]", sender.ConnectionId));
 
             // 通知界面
             this.Invoke(new SetAppStateDelegate(SetAppState), AppState.Stoped);
             return HandleResult.Ok;
         }
 
-        HandleResult OnError(IntPtr dwConnId, SocketOperation enOperation, int iErrorCode)
+        HandleResult OnError(TcpClient sender, SocketOperation enOperation, int errorCode)
         {
             // 出错了
 
-            AddMsg(string.Format(" > [{0},OnError] -> OP:{1},CODE:{2}", dwConnId, enOperation, iErrorCode));
+            AddMsg(string.Format(" > [{0},OnError] -> OP:{1},CODE:{2}", sender.ConnectionId, enOperation, errorCode));
 
             // 通知界面,只处理了连接错误,也没进行是不是连接错误的判断,所以有错误就会设置界面
             // 生产环境请自己控制

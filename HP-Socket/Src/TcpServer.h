@@ -1,7 +1,7 @@
 /*
  * Copyright: JessMA Open Source (ldcsaa@gmail.com)
  *
- * Version	: 3.2.3
+ * Version	: 3.3.1
  * Author	: Bruce Liang
  * Website	: http://www.jessma.org
  * Project	: https://github.com/ldcsaa
@@ -43,7 +43,7 @@ public:
 	, m_pfnGetAcceptExSockaddrs	(nullptr)
 	, m_pfnDisconnectEx			(nullptr)
 	, m_enLastError				(SE_OK)
-	, m_enState					(SS_STOPED)
+	, m_enState					(SS_STOPPED)
 	, m_enSendPolicy			(SP_PACK)
 	, m_enRecvPolicy			(RP_SERIAL)
 	, m_dwWorkerThreadCount		(DEFAULT_WORKER_THREAD_COUNT)
@@ -58,11 +58,12 @@ public:
 	, m_dwKeepAliveTime			(DEFALUT_TCP_KEEPALIVE_TIME)
 	, m_dwKeepAliveInterval		(DEFALUT_TCP_KEEPALIVE_INTERVAL)
 	, m_dwMaxShutdownWaitTime	(DEFAULT_MAX_SHUTDOWN_WAIT_TIME)
+	, m_bMarkSilence			(FALSE)
 	{
 		ASSERT(m_wsSocket.IsValid());
 		ASSERT(m_psoListener);
 
-		Reset();
+		Reset(FALSE);
 	}
 
 	virtual ~CTcpServer()
@@ -81,6 +82,7 @@ public:
 	virtual EnServiceState	GetState					()	{return m_enState;}
 	virtual BOOL			Disconnect					(CONNID dwConnID, BOOL bForce = TRUE);
 	virtual BOOL			DisconnectLongConnections	(DWORD dwPeriod, BOOL bForce = TRUE);
+	virtual BOOL			DisconnectSilenceConnections(DWORD dwPeriod, BOOL bForce = TRUE);
 	virtual BOOL			GetListenAddress			(TCHAR lpszAddress[], int& iAddressLen, USHORT& usPort);
 	virtual BOOL			GetRemoteAddress			(CONNID dwConnID, TCHAR lpszAddress[], int& iAddressLen, USHORT& usPort);
 	
@@ -88,6 +90,7 @@ public:
 	virtual DWORD GetConnectionCount	();
 	virtual BOOL GetAllConnectionIDs	(CONNID pIDs[], DWORD& dwCount);
 	virtual BOOL GetConnectPeriod		(CONNID dwConnID, DWORD& dwPeriod);
+	virtual BOOL GetSilencePeriod		(CONNID dwConnID, DWORD& dwPeriod);
 	virtual EnSocketError GetLastError	()	{return m_enLastError;}
 	virtual LPCTSTR	GetLastErrorDesc	()	{return ::GetSocketErrorDesc(m_enLastError);}
 
@@ -109,6 +112,7 @@ public:
 	virtual void SetKeepAliveTime			(DWORD dwKeepAliveTime)			{m_dwKeepAliveTime			= dwKeepAliveTime;}
 	virtual void SetKeepAliveInterval		(DWORD dwKeepAliveInterval)		{m_dwKeepAliveInterval		= dwKeepAliveInterval;}
 	virtual void SetMaxShutdownWaitTime		(DWORD dwMaxShutdownWaitTime)	{m_dwMaxShutdownWaitTime	= dwMaxShutdownWaitTime;}
+	virtual void SetMarkSilence				(BOOL bMarkSilence)				{m_bMarkSilence				= bMarkSilence;}
 
 	virtual EnSendPolicy GetSendPolicy		()	{return m_enSendPolicy;}
 	virtual EnRecvPolicy GetRecvPolicy		()	{return m_enRecvPolicy;}
@@ -124,6 +128,7 @@ public:
 	virtual DWORD GetKeepAliveTime			()	{return m_dwKeepAliveTime;}
 	virtual DWORD GetKeepAliveInterval		()	{return m_dwKeepAliveInterval;}
 	virtual DWORD GetMaxShutdownWaitTime	()	{return m_dwMaxShutdownWaitTime;}
+	virtual BOOL  IsMarkSilence				()	{return m_bMarkSilence;}
 
 protected:
 	virtual EnHandleResult FireReceive(TSocketObj* pSocketObj, const BYTE* pData, int iLength);
@@ -137,10 +142,11 @@ protected:
 		{return m_psoListener->OnAccept(dwConnID, soClient);}
 	virtual EnHandleResult FireSend(CONNID dwConnID, const BYTE* pData, int iLength)
 		{return m_psoListener->OnSend(dwConnID, pData, iLength);}
-	virtual EnHandleResult FireServerShutdown()
-		{return m_psoListener->OnServerShutdown();}
+	virtual EnHandleResult FireShutdown()
+		{return m_psoListener->OnShutdown();}
 
 	virtual BOOL CheckParams();
+	virtual void Reset(BOOL bAll = TRUE);
 
 private:
 	BOOL CheckStarting();
@@ -159,8 +165,6 @@ private:
 	void ReleaseFreeBuffer();
 	void WaitForWorkerThreadEnd();
 	void CloseCompletePort();
-
-	void Reset();
 
 	void		CompressFreeBuffer(size_t size);
 	void		CompressFreeSocket(size_t size, BOOL bForce = FALSE);
@@ -227,6 +231,7 @@ private:
 	DWORD m_dwKeepAliveTime;
 	DWORD m_dwKeepAliveInterval;
 	DWORD m_dwMaxShutdownWaitTime;
+	BOOL  m_bMarkSilence;
 
 private:
 	CInitSocket					m_wsSocket;
@@ -246,6 +251,8 @@ private:
 	CPrivateHeap		m_phBuffer;
 	CPrivateHeap		m_phSocket;
 	CItemPool			m_itPool;
+
+	CSpinGuard			m_csState;
 
 	CRWLock				m_csClientSocket;
 	TSocketObjPtrMap	m_mpClientSocket;
